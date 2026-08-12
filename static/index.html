@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>지수 알리미</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card-bg: #1a1d24;
+    --border: #2a2e37;
+    --text: #e6e8eb;
+    --text-dim: #9aa0aa;
+    --up: #ff5b5b;
+    --down: #4d8cff;
+    --flat: #9aa0aa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Malgun Gothic", sans-serif;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 16px;
+  }
+  h1 { font-size: 20px; margin: 0; }
+  .meta { font-size: 13px; color: var(--text-dim); }
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin: 0 0 6px;
+    padding-left: 2px;
+    display: flex;
+    align-items: center;
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  /* 최상단~전체 레이아웃: 기본 2열 그리드. 국내수급/거래대금상위는 각 1칸,
+     주요지표 및 그 외 섹션은 전체 폭(full-width)을 차지합니다. */
+  #content {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .section-block.full-width { grid-column: 1 / -1; }
+  @media (max-width: 860px) {
+    #content { grid-template-columns: 1fr; }
+  }
+
+  /* ---- 국내 수급 / 거래대금 상위: 코스피·코스닥 2열로 쪼갠 컴팩트 패널 ---- */
+  .split-panel { display: grid; grid-template-columns: 1fr 1fr; }
+  .split-col + .split-col { border-left: 1px solid var(--border); }
+  .split-col-title {
+    font-size: 11px; font-weight: 600; color: var(--text-dim);
+    padding: 8px 10px 4px;
+  }
+  .compact-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    gap: 8px;
+  }
+  .compact-row:last-child { border-bottom: none; }
+  .compact-row .label { font-size: 12px; }
+  .compact-row .value { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .compact-row .change { font-size: 10px; font-variant-numeric: tabular-nums; margin-top: 1px; }
+  .compact-row .extra { font-size: 9.5px; color: var(--text-dim); margin-top: 1px; }
+  @media (max-width: 480px) {
+    .split-panel { grid-template-columns: 1fr; }
+    .split-col + .split-col { border-left: none; border-top: 1px solid var(--border); }
+  }
+
+  /* ---- 주요지표(국내지수+금리+해외자산): 구분선 없이 3열 카드 그리드 ---- */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .metric-chip {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .metric-chip .chip-top { display: flex; align-items: center; gap: 4px; }
+  .metric-chip .label { font-size: 11px; color: var(--text-dim); margin-bottom: 3px; }
+  .metric-chip .value { font-size: 14px; font-variant-numeric: tabular-nums; }
+  .metric-chip .change { font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .metric-chip .extra { font-size: 9.5px; color: var(--text-dim); margin-top: 2px; }
+  @media (max-width: 700px) {
+    .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 420px) {
+    .metric-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ---- 그 외 섹션(폴백): 기존 세로 리스트 스타일 ---- */
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    gap: 10px;
+  }
+  .row:last-child { border-bottom: none; }
+  .label { font-size: 14px; }
+  .extra { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .value-wrap { text-align: right; }
+  .value { font-size: 15px; font-variant-numeric: tabular-nums; }
+  .change { font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .flat { color: var(--flat); }
+  .status {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-align: center;
+    margin-top: 24px;
+  }
+  .refresh-btn {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .refresh-btn:active { opacity: 0.7; }
+  .baseline-warning {
+    font-size: 12px;
+    color: #d9a441;
+    background: #2a2416;
+    border: 1px solid #4a3f22;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+  }
+  .empty {
+    color: var(--text-dim);
+    font-size: 13px;
+    padding: 20px 4px;
+    text-align: center;
+  }
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+  .live-on { color: #3ddc84; background: rgba(61, 220, 132, 0.12); }
+  .live-off { color: #d9a441; background: rgba(217, 164, 65, 0.12); }
+  .live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+  }
+  .live-on .live-dot { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .title-row { display: flex; align-items: center; gap: 10px; }
+  .header-btns { display: flex; gap: 6px; }
+  .edit-hint {
+    font-size: 12px;
+    color: var(--text-dim);
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+  }
+  .drag-handle {
+    cursor: grab;
+    opacity: 0.55;
+    padding-right: 6px;
+    font-size: 14px;
+    user-select: none;
+  }
+  .section-block.editable .section-title { cursor: grab; }
+  .row.editable, .compact-row.editable, .metric-chip.editable { cursor: grab; }
+  .dragging { opacity: 0.35; }
+  .drag-over { outline: 2px dashed var(--down); outline-offset: -2px; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="title-row">
+      <h1>지수 알리미</h1>
+      <span class="live-badge live-off" id="live-badge"><span class="live-dot"></span><span id="live-text">연결 중</span></span>
+    </div>
+    <div class="header-btns">
+      <button class="refresh-btn" id="edit-toggle" onclick="toggleEdit()">순서 편집</button>
+      <button class="refresh-btn" onclick="load()">새로고침</button>
+    </div>
+  </header>
+  <div class="meta" id="meta">불러오는 중...</div>
+  <div id="warning"></div>
+  <div id="edit-hint"></div>
+  <div id="content"></div>
+  <div class="status" id="status"></div>
+
+<script>
+const SLOT_LABEL = {day: "낮(08:00~19:59)", night: "야간(20:00~07:59)"};
+const FALLBACK_POLL_MS = 30000;
+const MAX_WS_RETRIES = 6;
+
+// 화면 배치 규칙:
+//  - 국내 수급 / 국내 거래대금 상위 -> 최상단에 나란히(2열), 각각 코스피·코스닥으로 다시 2분할
+//  - 국내 지수 / 금리 / 해외 자산 -> 구분선 없이 "주요지표" 하나로 묶어 3열 카드 그리드
+//  - 그 외(향후 추가되는 섹션 등) -> 기존 세로 리스트 스타일로 폴백
+const TOP_DUO_SECTIONS = ["국내 수급", "국내 거래대금 상위"];
+const MERGED_KEY = "주요지표";
+const MERGED_SECTIONS = ["국내 지수", "금리", "해외 자산"];
+
+function fmtValue(v, unit) {
+  if (v === null || v === undefined) return "N/A";
+  const s = Number(v).toLocaleString("ko-KR", {maximumFractionDigits: 2, minimumFractionDigits: 2});
+  return unit ? `${s}${unit}` : s;
+}
+
+// 변동폭(amt)과 변동률(pct)을 함께 표시. 예: "+12.34억원 (+1.23%)"
+function fmtChange(item) {
+  const pct = item.change_pct;
+  const amt = item.change_amt;
+  if ((pct === null || pct === undefined) && (amt === null || amt === undefined)) {
+    return {text: "-", cls: "flat"};
+  }
+  const ref = (pct !== null && pct !== undefined) ? pct : amt;
+  const cls = ref > 0 ? "up" : (ref < 0 ? "down" : "flat");
+  const parts = [];
+  if (amt !== null && amt !== undefined) {
+    const sign = amt >= 0 ? "+" : "";
+    const amtStr = Number(amt).toLocaleString("ko-KR", {maximumFractionDigits: 2});
+    parts.push(`${sign}${amtStr}${item.unit || ""}`);
+  }
+  if (pct !== null && pct !== undefined) {
+    const sign = pct >= 0 ? "+" : "";
+    parts.push(`(${sign}${pct.toFixed(2)}%)`);
+  }
+  return {text: parts.join(" ") || "-", cls};
+}
+
+// vs_yesterday / vs_20d_avg 같은 {amt, pct} 비교 객체를 "라벨: +값(비율%)" 문자열로 변환
+function fmtCompare(label, cmp, unit) {
+  if (!cmp || (cmp.amt === null || cmp.amt === undefined) && (cmp.pct === null || cmp.pct === undefined)) {
+    return null;
+  }
+  const parts = [];
+  if (cmp.amt !== null && cmp.amt !== undefined) {
+    const sign = cmp.amt >= 0 ? "+" : "";
+    parts.push(`${sign}${Number(cmp.amt).toLocaleString("ko-KR", {maximumFractionDigits: 2})}${unit || ""}`);
+  }
+  if (cmp.pct !== null && cmp.pct !== undefined) {
+    const sign = cmp.pct >= 0 ? "+" : "";
+    parts.push(`(${sign}${cmp.pct.toFixed(2)}%)`);
+  }
+  return `${label} ${parts.join(" ")}`;
+}
+
+function renderItemExtraLines(item) {
+  const avgDaysLabel = item.avg_days ? `(${item.avg_days}일)` : "";
+  return [
+    fmtCompare("종가", item.vs_yesterday, item.unit),
+    fmtCompare("20일평균", item.vs_20d_avg, item.unit),
+    fmtCompare("전일동시각比", item.vs_yesterday_st, item.unit),
+    fmtCompare(`최근${avgDaysLabel}동시각평균比`, item.vs_20d_avg_st, item.unit),
+  ].filter(Boolean);
+}
+
+async function load() {
+  const statusEl = document.getElementById("status");
+  statusEl.textContent = "갱신 중...";
+  try {
+    const resp = await fetch("/api/report", {cache: "no-store"});
+    if (!resp.ok) {
+      statusEl.textContent = `오류 (HTTP ${resp.status})`;
+      return;
+    }
+    const data = await resp.json();
+    render(data);
+    statusEl.textContent = "마지막 갱신(폴링): " + new Date().toLocaleTimeString("ko-KR");
+  } catch (e) {
+    statusEl.textContent = "네트워크 오류: " + e;
+  }
+}
+
+// ------------------------------------------------------------------
+// 실시간 갱신: WebSocket 우선, 계속 실패하면 REST 폴링으로 자동 전환
+// ------------------------------------------------------------------
+let ws = null;
+let wsRetries = 0;
+let pollTimer = null;
+let usingFallback = false;
+
+function setLive(isLive, label) {
+  const badge = document.getElementById("live-badge");
+  const text = document.getElementById("live-text");
+  badge.className = "live-badge " + (isLive ? "live-on" : "live-off");
+  text.textContent = label || (isLive ? "실시간 연결됨" : "연결 끊김");
+}
+
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  try {
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+  } catch (e) {
+    scheduleReconnectOrFallback();
+    return;
+  }
+
+  ws.onopen = () => {
+    wsRetries = 0;
+    setLive(true);
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      usingFallback = false;
+    }
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      render(data);
+      document.getElementById("status").textContent =
+        "실시간 갱신: " + new Date().toLocaleTimeString("ko-KR") + ` (약 ${WS_INTERVAL_HINT}초 간격)`;
+    } catch (e) {
+      console.error("메시지 처리 오류", e);
+    }
+  };
+
+  ws.onclose = () => {
+    setLive(false, "재연결 중");
+    scheduleReconnectOrFallback();
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+function scheduleReconnectOrFallback() {
+  wsRetries += 1;
+  if (wsRetries <= MAX_WS_RETRIES) {
+    const delay = Math.min(2000 * wsRetries, 15000);
+    setTimeout(connectWS, delay);
+  } else if (!usingFallback) {
+    usingFallback = true;
+    setLive(false, "폴링 모드");
+    load();
+    pollTimer = setInterval(load, FALLBACK_POLL_MS);
+  }
+}
+
+const WS_INTERVAL_HINT = 20;
+
+// ------------------------------------------------------------------
+// 순서 편집 (드래그 앤 드롭 + localStorage 저장)
+// v2: 레이아웃을 패널(블록) 단위로 재구성하면서 저장 키를 갱신
+// ------------------------------------------------------------------
+const ORDER_STORAGE_KEY = "idxalarm_order_v2";
+let editMode = false;
+let lastData = null;
+
+function loadOrderPrefs() {
+  try {
+    const raw = localStorage.getItem(ORDER_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {sections: [], items: {}};
+  } catch (e) {
+    return {sections: [], items: {}};
+  }
+}
+
+function saveOrderPrefs() {
+  localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(orderPrefs));
+}
+
+let orderPrefs = loadOrderPrefs();
+
+function applySavedOrder(keys, saved) {
+  if (!saved || !saved.length) return keys;
+  const known = saved.filter((k) => keys.includes(k));
+  const rest = keys.filter((k) => !saved.includes(k));
+  return [...known, ...rest];
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function toggleEdit() {
+  editMode = !editMode;
+  document.getElementById("edit-toggle").textContent = editMode ? "편집 완료" : "순서 편집";
+  document.getElementById("edit-hint").innerHTML = editMode
+    ? `<div class="edit-hint">패널 제목이나 항목을 드래그해서 순서를 바꿀 수 있습니다(같은 항목끼리만 이동 가능). 순서는 이 브라우저에 자동 저장됩니다.
+       <button class="refresh-btn" style="margin-left:8px" onclick="resetOrder()">순서 초기화</button></div>`
+    : "";
+  if (lastData) render(lastData);
+}
+
+function resetOrder() {
+  orderPrefs = {sections: [], items: {}};
+  saveOrderPrefs();
+  if (lastData) render(lastData);
+}
+
+function splitByMarket(items) {
+  const groups = {"코스피": [], "코스닥": [], "기타": []};
+  for (const item of items) {
+    if (item.label.startsWith("코스피 ")) groups["코스피"].push(item);
+    else if (item.label.startsWith("코스닥 ")) groups["코스닥"].push(item);
+    else groups["기타"].push(item);
+  }
+  return groups;
+}
+
+function stripMarketPrefix(label) {
+  return label.replace(/^(코스피|코스닥)\s/, "");
+}
+
+// 비교 항목(종가比/20일평균比/전일동시각比/최근N일동시각평균比)을 한 줄에 몰아넣지 않고
+// 각각 별도의 줄(div)로 렌더링
+function renderExtraLines(cmpLines) {
+  return cmpLines.map((l) => `<div class="extra">${escapeHtml(l)}</div>`).join("");
+}
+
+function renderRow(item, section) {
+  const change = fmtChange(item);
+  const cmpLines = renderItemExtraLines(item);
+  return `
+    <div class="row${editMode ? " editable" : ""}" draggable="${editMode}" data-item-drag="${escapeHtml(item.label)}" data-section-drag-item="${escapeHtml(section)}">
+      ${editMode ? '<span class="drag-handle">⠿</span>' : ""}
+      <div>
+        <div class="label">${escapeHtml(item.label)}</div>
+        ${item.extra ? `<div class="extra">${escapeHtml(item.extra)}</div>` : ""}
+        ${renderExtraLines(cmpLines)}
+      </div>
+      <div class="value-wrap">
+        <div class="value">${fmtValue(item.value, item.unit)}</div>
+        <div class="change ${change.cls}">${change.text}</div>
+      </div>
+    </div>`;
+}
+
+function renderCompactRow(item, section, stripPrefix) {
+  const change = fmtChange(item);
+  const cmpLines = renderItemExtraLines(item);
+  const label = stripPrefix ? stripMarketPrefix(item.label) : item.label;
+  return `
+    <div class="compact-row${editMode ? " editable" : ""}" draggable="${editMode}" data-item-drag="${escapeHtml(item.label)}" data-section-drag-item="${escapeHtml(section)}">
+      ${editMode ? '<span class="drag-handle">⠿</span>' : ""}
+      <div>
+        <div class="label">${escapeHtml(label)}</div>
+        ${item.extra ? `<div class="extra">${escapeHtml(item.extra)}</div>` : ""}
+        ${renderExtraLines(cmpLines)}
+      </div>
+      <div class="value-wrap">
+        <div class="value">${fmtValue(item.value, item.unit)}</div>
+        <div class="change ${change.cls}">${change.text}</div>
+      </div>
+    </div>`;
+}
+
+function renderMetricChip(item, section) {
+  const change = fmtChange(item);
+  const cmpLines = renderItemExtraLines(item);
+  return `
+    <div class="metric-chip${editMode ? " editable" : ""}" draggable="${editMode}" data-item-drag="${escapeHtml(item.label)}" data-section-drag-item="${escapeHtml(section)}">
+      <div class="chip-top">${editMode ? '<span class="drag-handle">⠿</span>' : ""}<span class="label">${escapeHtml(item.label)}</span></div>
+      <div class="value">${fmtValue(item.value, item.unit)}</div>
+      <div class="change ${change.cls}">${change.text}</div>
+      ${item.extra ? `<div class="extra">${escapeHtml(item.extra)}</div>` : ""}
+      ${renderExtraLines(cmpLines)}
+    </div>`;
+}
+
+function render(data) {
+  lastData = data;
+  const meta = document.getElementById("meta");
+  const generated = new Date(data.generated_at);
+  meta.textContent = `${generated.toLocaleString("ko-KR")} · ${SLOT_LABEL[data.slot] || data.slot} · 기준: ${data.baseline_label || "-"}`;
+
+  const warningEl = document.getElementById("warning");
+  warningEl.innerHTML = data.baseline_is_fresh
+    ? `<div class="baseline-warning">지금 값이 이번 구간의 기준점(${escapeHtml(data.baseline_label || "")})으로 막 저장됐습니다. 그래서 변동폭/변동률이 0으로 보입니다 - 이후 값부터 이 기준과 비교됩니다.</div>`
+    : "";
+
+  const items = data.items || [];
+  const bySection = {};
+  let sectionOrder = [];
+  for (const item of items) {
+    if (!bySection[item.section]) {
+      bySection[item.section] = [];
+      sectionOrder.push(item.section);
+    }
+    bySection[item.section].push(item);
+  }
+
+  // 섹션 내부(항목) 순서는 실제 백엔드 section 기준으로 저장/복원 (레이아웃과 무관)
+  for (const section of sectionOrder) {
+    const labels = bySection[section].map((i) => i.label);
+    const savedLabels = (orderPrefs.items || {})[section];
+    const orderedLabels = applySavedOrder(labels, savedLabels);
+    bySection[section].sort((a, b) => orderedLabels.indexOf(a.label) - orderedLabels.indexOf(b.label));
+  }
+
+  const content = document.getElementById("content");
+  if (sectionOrder.length === 0) {
+    content.innerHTML = `<div class="empty">표시할 데이터가 없습니다. 서버 환경변수(API 키) 설정을 확인하세요.</div>`;
+    return;
+  }
+
+  // 화면에 그릴 "패널(블록)" 목록 구성
+  const blocks = [];
+  const topDuoPresent = TOP_DUO_SECTIONS.filter((s) => bySection[s]);
+  for (const section of topDuoPresent) {
+    blocks.push({key: section, title: section, style: "split", fullWidth: topDuoPresent.length < 2, sections: [section]});
+  }
+  const mergedSections = MERGED_SECTIONS.filter((s) => bySection[s]);
+  if (mergedSections.length) {
+    blocks.push({key: MERGED_KEY, title: MERGED_KEY, style: "grid", fullWidth: true, sections: mergedSections});
+  }
+  for (const section of sectionOrder) {
+    if (TOP_DUO_SECTIONS.includes(section) || MERGED_SECTIONS.includes(section)) continue;
+    blocks.push({key: section, title: section, style: "list", fullWidth: true, sections: [section]});
+  }
+
+  const blockKeys = blocks.map((b) => b.key);
+  const orderedKeys = applySavedOrder(blockKeys, orderPrefs.sections);
+  blocks.sort((a, b) => orderedKeys.indexOf(a.key) - orderedKeys.indexOf(b.key));
+
+  let html = "";
+  for (const block of blocks) {
+    html += `<div class="section-block${block.fullWidth ? " full-width" : ""}${editMode ? " editable" : ""}" draggable="${editMode}" data-section-drag="${escapeHtml(block.key)}">`;
+    html += `<div class="section-title">${editMode ? '<span class="drag-handle">⠿</span>' : ""}${escapeHtml(block.title)}</div>`;
+
+    if (block.style === "split") {
+      const groups = splitByMarket(bySection[block.sections[0]] || []);
+      html += `<div class="card split-panel">`;
+      for (const marketLabel of ["코스피", "코스닥"]) {
+        const g = groups[marketLabel];
+        if (!g.length) continue;
+        html += `<div class="split-col"><div class="split-col-title">${marketLabel}</div>`;
+        for (const item of g) html += renderCompactRow(item, block.sections[0], true);
+        html += `</div>`;
+      }
+      if (groups["기타"].length) {
+        html += `<div class="split-col"><div class="split-col-title">기타</div>`;
+        for (const item of groups["기타"]) html += renderCompactRow(item, block.sections[0], false);
+        html += `</div>`;
+      }
+      html += `</div>`;
+    } else if (block.style === "grid") {
+      html += `<div class="metric-grid">`;
+      for (const section of block.sections) {
+        for (const item of bySection[section] || []) {
+          html += renderMetricChip(item, section);
+        }
+      }
+      html += `</div>`;
+    } else {
+      html += `<div class="card">`;
+      for (const item of bySection[block.sections[0]] || []) {
+        html += renderRow(item, block.sections[0]);
+      }
+      html += `</div>`;
+    }
+
+    html += `</div>`;
+  }
+  content.innerHTML = html;
+}
+
+// ------------------------------------------------------------------
+// 드래그 앤 드롭 이벤트 (이벤트 위임 - render()가 innerHTML을 새로 그려도 계속 동작)
+// 항목(item)은 스타일(.row/.compact-row/.metric-chip)에 상관없이
+// [data-item-drag] 속성으로 식별합니다.
+// ------------------------------------------------------------------
+let dragSrcEl = null;
+let dragSrcType = null; // "item" | "section"
+let dragSrcSection = null;
+
+const contentEl = document.getElementById("content");
+
+contentEl.addEventListener("dragstart", (e) => {
+  const itemEl = e.target.closest('[data-item-drag][draggable="true"]');
+  const sectionEl = e.target.closest('.section-block[draggable="true"]');
+  if (itemEl) {
+    dragSrcEl = itemEl;
+    dragSrcType = "item";
+    dragSrcSection = itemEl.getAttribute("data-section-drag-item");
+    itemEl.classList.add("dragging");
+  } else if (sectionEl) {
+    dragSrcEl = sectionEl;
+    dragSrcType = "section";
+    sectionEl.classList.add("dragging");
+  }
+});
+
+contentEl.addEventListener("dragend", () => {
+  if (dragSrcEl) dragSrcEl.classList.remove("dragging");
+  document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+  dragSrcEl = null;
+  dragSrcType = null;
+  dragSrcSection = null;
+});
+
+contentEl.addEventListener("dragover", (e) => {
+  if (!dragSrcType) return;
+  e.preventDefault();
+  document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+  if (dragSrcType === "item") {
+    const target = e.target.closest('[data-item-drag][draggable="true"]');
+    if (target && target !== dragSrcEl && target.getAttribute("data-section-drag-item") === dragSrcSection) {
+      target.classList.add("drag-over");
+    }
+  } else if (dragSrcType === "section") {
+    const target = e.target.closest('.section-block[draggable="true"]');
+    if (target && target !== dragSrcEl) target.classList.add("drag-over");
+  }
+});
+
+contentEl.addEventListener("drop", (e) => {
+  e.preventDefault();
+  document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+  if (!dragSrcEl) return;
+
+  if (dragSrcType === "item") {
+    const target = e.target.closest('[data-item-drag][draggable="true"]');
+    if (!target || target === dragSrcEl) return;
+    const section = dragSrcSection;
+    if (target.getAttribute("data-section-drag-item") !== section) return;
+    const srcLabel = dragSrcEl.getAttribute("data-item-drag");
+    const tgtLabel = target.getAttribute("data-item-drag");
+    const rows = Array.from(document.querySelectorAll(`[data-item-drag][data-section-drag-item="${cssAttrEscape(section)}"]`));
+    const labels = rows.map((r) => r.getAttribute("data-item-drag"));
+    const srcIdx = labels.indexOf(srcLabel);
+    const tgtIdx = labels.indexOf(tgtLabel);
+    if (srcIdx === -1 || tgtIdx === -1) return;
+    labels.splice(srcIdx, 1);
+    labels.splice(tgtIdx, 0, srcLabel);
+    orderPrefs.items = orderPrefs.items || {};
+    orderPrefs.items[section] = labels;
+    saveOrderPrefs();
+    render(lastData);
+  } else if (dragSrcType === "section") {
+    const target = e.target.closest('.section-block[draggable="true"]');
+    if (!target || target === dragSrcEl) return;
+    const srcSection = dragSrcEl.getAttribute("data-section-drag");
+    const tgtSection = target.getAttribute("data-section-drag");
+    const blocksEls = Array.from(document.querySelectorAll(".section-block[data-section-drag]"));
+    const sections = blocksEls.map((b) => b.getAttribute("data-section-drag"));
+    const srcIdx = sections.indexOf(srcSection);
+    const tgtIdx = sections.indexOf(tgtSection);
+    if (srcIdx === -1 || tgtIdx === -1) return;
+    sections.splice(srcIdx, 1);
+    sections.splice(tgtIdx, 0, srcSection);
+    orderPrefs.sections = sections;
+    saveOrderPrefs();
+    render(lastData);
+  }
+});
+
+function cssAttrEscape(s) {
+  return String(s).replace(/"/g, '\\"');
+}
+
+connectWS();
+</script>
+</body>
+</html>

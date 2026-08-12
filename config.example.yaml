@@ -1,0 +1,118 @@
+# ==========================================================
+# 설정 파일 예시
+# 이 파일을 복사해서 "config.yaml" 이라는 이름으로 저장한 뒤
+# 실제 발급받은 값으로 채워 넣으세요.
+#   Windows PowerShell:  Copy-Item config.example.yaml config.yaml
+# config.yaml 은 .gitignore 에 등록되어 있으니, 저장소에 커밋하지 마세요.
+# ==========================================================
+
+kiwoom:
+  # https://openapi.kiwoom.com 에서 "API 사용신청" 후 발급받은 값
+  app_key: "YOUR_KIWOOM_APPKEY"
+  app_secret: "YOUR_KIWOOM_APPSECRET"
+  is_mock: false   # 모의투자 계좌로 테스트하려면 true
+
+# 국내 지수/수급/거래대금 조회에 사용할 업종 코드 (키움 REST 기준)
+# 최초 실행 전, ka10101(업종코드 리스트) 응답으로 본인 계정 기준 코드가 맞는지 꼭 확인하세요.
+kiwoom_market_codes:
+  kospi: "001"   # 코스피 종합주가지수
+  kosdaq: "101"  # 코스닥 종합지수
+
+# 해외 자산 - yfinance 티커 매핑 (필요 없는 항목은 지우거나 enabled: false)
+overseas_assets:
+  - key: "USTECH"
+    label: "US Tech 100 (나스닥100 선물)"
+    ticker: "NQ=F"
+    enabled: true
+  - key: "US500"
+    label: "S&P 500 선물"
+    ticker: "ES=F"
+    enabled: true
+  - key: "JP225"
+    label: "닛케이225"
+    ticker: "^N225"
+    enabled: true
+  - key: "SOX"
+    label: "필라델피아 반도체지수"
+    ticker: "^SOX"
+    enabled: true
+  - key: "VIX"
+    label: "CBOE 변동성지수(VIX)"
+    ticker: "^VIX"
+    enabled: true
+  - key: "DXY"
+    label: "달러 인덱스(DXY)"
+    ticker: "DX-Y.NYB"
+    enabled: true
+  - key: "USDKRW"
+    label: "달러/원 환율"
+    ticker: "KRW=X"
+    enabled: true
+  - key: "WTI"
+    label: "WTI유 선물"
+    ticker: "CL=F"
+    enabled: true
+  - key: "BRENT"
+    label: "브렌트유 선물"
+    ticker: "BZ=F"
+    enabled: true
+  - key: "BTCUSD"
+    label: "비트코인/USD"
+    ticker: "BTC-USD"
+    enabled: true
+  - key: "ETHUSD"
+    label: "이더리움/USD"
+    ticker: "ETH-USD"
+    enabled: true
+  - key: "US10Y"
+    label: "미국 10년물 국채금리"
+    ticker: "^TNX"
+    enabled: true
+  - key: "US30Y"
+    label: "미국 30년물 국채금리"
+    ticker: "^TYX"
+    enabled: true
+  - key: "GOLD"
+    label: "금 선물"
+    ticker: "GC=F"
+    enabled: true
+  - key: "SILVER"
+    label: "은 선물"
+    ticker: "SI=F"
+    enabled: true
+  # 미국 2년물 국채금리는 야후파이낸스에 안정적인 실시간 티커가 없어 기본 비활성화.
+  # 필요하면 FRED(DGS2, 일 1회 갱신) 등 대체 소스 연동 후 enabled: true 로 변경하세요.
+  - key: "US2Y"
+    label: "미국 2년물 국채금리"
+    ticker: "UNKNOWN"
+    enabled: false
+
+# 한국 국채 3년물 금리 - 한국은행 ECOS Open API (선택, 일 1회 갱신)
+# https://ecos.bok.or.kr 에서 무료로 인증키 발급
+ecos:
+  enabled: false
+  api_key: "YOUR_ECOS_API_KEY"
+
+# 코스피200 야간선물 - 키움 REST API에는 선물/옵션 카테고리가 없어
+# 비공식 사이트(sonmul.co.kr) 스크래핑으로 대체합니다. (참고용, README 참고)
+# 무료로 쓸 수 있는 스크래핑 소스를 찾지 못해(전부 자바스크립트/웹소켓 렌더링)
+# 기본 비활성화. night_futures_client.py 상단 주석 참고.
+night_futures:
+  enabled: false
+
+# 리포트 스케줄 (Asia/Seoul 기준, main.py --slot 인자로 지정)
+schedule:
+  timezone: "Asia/Seoul"
+  slots:
+    morning:
+      time: "07:30"
+      baseline: "prev_evening"    # 전일 evening 스냅샷과 비교
+    afternoon:
+      time: "15:00"
+      baseline: "today_morning"   # 당일 morning 스냅샷과 비교
+    evening:
+      time: "19:30"
+      baseline: "today_morning"   # 당일 morning 스냅샷과 비교
+
+snapshot_file: "snapshots.json"
+reports_dir: "reports"   # 실행할 때마다 이 폴더에 날짜별 리포트 텍스트 파일이 저장됩니다.
