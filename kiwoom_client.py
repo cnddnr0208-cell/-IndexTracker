@@ -110,7 +110,19 @@ class KiwoomClient:
 
     def login(self):
         # TR: au10001 (접근토큰 발급)
-        self._api.login()
+        # 주의: kiwoom_rest_api 라이브러리의 KiwoomAPI.login()은 응답에 토큰이
+        # 없어도(예: appkey/secret 오류, IP 제한, 미승인 앱 등으로 Kiwoom이
+        # return_code!=0 인 에러 바디를 HTTP 200으로 내려줘도) 예외를 던지지
+        # 않고 access_token을 빈 문자열로 조용히 저장한다. 그러면 이후 모든
+        # API 호출이 "authorization 필드가 설정되어 있어야 합니다" 라는
+        # 엉뚱해 보이는 오류로 실패해서 진짜 원인(로그인 실패 사유)이 로그에
+        # 안 남는다. 그래서 여기서 토큰 발급 여부를 직접 확인해 실패 시
+        # Kiwoom이 실제로 응답한 내용을 그대로 로그/예외에 남긴다.
+        result = self._api.login()
+        token = (result or {}).get("token") or (result or {}).get("access_token")
+        if not token:
+            logger.error("Kiwoom 로그인(토큰 발급) 실패 - 토큰을 받지 못했습니다. Kiwoom 응답 원문: %s", result)
+            raise RuntimeError(f"Kiwoom 로그인 실패(토큰 미발급) - Kiwoom 응답: {result}")
         self._logged_in = True
 
     def logout(self):
