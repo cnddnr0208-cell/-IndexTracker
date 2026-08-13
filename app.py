@@ -1,7 +1,7 @@
 """
 지수 알리미 웹 대시보드
 ------------------------
-FastAPI 기반 웹 서버. 브라우저(PC/모바일)로 접속하면 국내/해외 지수, 코스피200 야간선물 등을
+FastAPI 기반 웹 서버. 브라우저(PC/모바일)로 접속하면 국내/해외 지수 등을
 현재값 + 기준점 대비 변동률로 보여줍니다. 인터넷 어디서나 접속 가능하도록 클라우드(Render 등)
 배포를 염두에 두고 설정을 전부 환경변수로 받습니다.
 
@@ -9,6 +9,11 @@ FastAPI 기반 웹 서버. 브라우저(PC/모바일)로 접속하면 국내/해
 연결이 끊기면 브라우저가 자동 재연결을 시도하고, 계속 실패하면 REST 폴링(/api/report)으로
 자동 전환됩니다. (완전한 틱 단위 실시간은 아니며, 원본 데이터 소스 갱신 주기 + 20초 캐시가
 체감 지연입니다. 원본 자체가 실시간이 아닌 항목도 있습니다 - 아래 "확인이 필요한 부분" 참고)
+
+국내 지수/수급/거래대금(키움 REST API)은 이 서버가 직접 수집하지 않습니다. 키움 계좌의
+"지정단말기(IP)" 보안 설정 때문에 등록된 집 PC에서만 로그인이 가능해서, 대신 집 PC에서
+주기 실행하는 local_collector.py가 수집해 Upstash Redis에 저장해두고, 이 서버는 그 값을
+읽기만 합니다. 자세한 내용은 README.md의 "국내 데이터 수집 - 집 PC 병행 실행" 참고.
 
 로컬 실행:
   uvicorn app:app --host 0.0.0.0 --port 8000
@@ -19,11 +24,13 @@ FastAPI 기반 웹 서버. 브라우저(PC/모바일)로 접속하면 국내/해
   환경변수 설정은 README.md의 "웹 대시보드 배포" 섹션 참고.
 
 필요한 환경변수:
-  KIWOOM_APP_KEY, KIWOOM_APP_SECRET, KIWOOM_IS_MOCK(true/false)
   ECOS_ENABLED(true/false), ECOS_API_KEY
-  NIGHT_FUTURES_ENABLED(true/false, 기본 false - 무료 스크래핑 소스가 전부 막혀서 기본 꺼짐)
   DASHBOARD_USERNAME, DASHBOARD_PASSWORD   (설정 안 하면 인증 없이 열림 - 로컬 테스트만 권장)
-  UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN  (없으면 로컬 파일로 폴백)
+  UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN  (집 PC의 local_collector.py와 반드시
+    같은 값을 써야 국내 데이터를 주고받을 수 있습니다. 없으면 로컬 파일로 폴백 - 그 경우
+    국내 데이터는 항상 비어 있습니다)
+  KIWOOM_APP_KEY/SECRET/IS_MOCK은 더 이상 이 서버(Render)에서 쓰지 않습니다
+    (집 PC의 local_collector.py에서만 필요) - Render 환경변수에서 지워도 됩니다.
 """
 
 import asyncio
@@ -47,11 +54,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from ecos_client import get_kr_3y_bond_yield
-from kiwoom_client import KiwoomClient
-from night_futures_client import get_kospi200_night_futures
 from overseas_client import OverseasClient
-from snapshot_store import SnapshotStore
-from snapshot_store_redis import RedisSnapshotStore
+from snapshot_store import get_store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -76,14 +80,15 @@ OVERSEAS_ASSETS = [
     {"key": "SILVER", "label": "은 선물", "ticker": "SI=F"},
 ]
 
-KIWOOM_MARKET_CODES = {"kospi": "001", "kosdaq": "101"}
+# local_collector.py가 Redis에 저장하는 키와 반드시 일치해야 함 (domestic_collector.py 참고)
+DOMESTIC_SNAPSHOT_KEY = "domestic_snapshot"
 CACHE_TTL_SECONDS = 20  # 실시간에 가깝게: 이 시간 내 반복 요청은 캐시된 값을 재사용(과도한 API 호출 방지)
 WS_PUSH_INTERVAL_SECONDS = 20  # WebSocket으로 새 값을 밀어주는 주기
 
 app = FastAPI(title="지수 알리미")
 security = HTTPBasic()
 
-_cache = {"data": None, "fetched_at": None}
+_cache = {"data": None, "fetched_at": None, "domestic_fetched_at": None}
 
 
 # ----------------------------------------------------------------------
@@ -122,21 +127,6 @@ def verify_ws_authorization(websocket: WebSocket) -> bool:
     return secrets.compare_digest(user, expected_user) and secrets.compare_digest(pw, expected_pass)
 
 
-# ----------------------------------------------------------------------
-# 저장소 (Redis 우선, 없으면 로컬 파일 폴백)
-# ----------------------------------------------------------------------
-def get_store():
-    url = os.environ.get("UPSTASH_REDIS_REST_URL")
-    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-    if url and token:
-        return RedisSnapshotStore(url, token)
-    logger.warning(
-        "UPSTASH_REDIS_REST_URL/TOKEN 미설정 - 로컬 파일(snapshots.json)로 폴백합니다. "
-        "클라우드 무료 호스팅에서는 재시작 시 기준값이 초기화될 수 있습니다."
-    )
-    return SnapshotStore("snapshots.json")
-
-
 def is_placeholder(v: Optional[str]) -> bool:
     return not v
 
@@ -144,88 +134,18 @@ def is_placeholder(v: Optional[str]) -> bool:
 # ----------------------------------------------------------------------
 # 데이터 수집
 # ----------------------------------------------------------------------
-def collect_domestic() -> dict:
-    app_key = os.environ.get("KIWOOM_APP_KEY")
-    app_secret = os.environ.get("KIWOOM_APP_SECRET")
-    if is_placeholder(app_key) or is_placeholder(app_secret):
-        logger.warning("KIWOOM_APP_KEY/SECRET 미설정 - 국내 지표 생략")
-        return {}
-    is_mock = os.environ.get("KIWOOM_IS_MOCK", "false").lower() == "true"
-    client = KiwoomClient(app_key, app_secret, is_mock)
-    client.login()
-    try:
-        data = {}
-        for market_name, code in KIWOOM_MARKET_CODES.items():
-            data[f"{market_name}_index"] = client.get_index_price(code)
-            data[f"{market_name}_investor_netbuy"] = client.get_investor_net_buy(code)
-            data[f"{market_name}_top_trading_value"] = client.get_top_trading_value(code, top_n=5)
-        return data
-    finally:
-        client.logout()
-
-
-def collect_domestic_history(current: dict) -> dict:
+def get_domestic_snapshot(store) -> tuple:
     """
-    국내 수급/거래대금 상위 항목의 "전일 마감" · "최근 20일 평균(마감 기준)" 비교용
-    이력 데이터.
+    국내 지수/수급/거래대금(+이력)을 이 서버가 직접 키움 API로 수집하지 않고,
+    집 PC의 local_collector.py가 Redis(DOMESTIC_SNAPSHOT_KEY)에 저장해둔 값을
+    읽어오기만 한다 (이유는 파일 상단 docstring 참고 - 키움 지정단말기 제한).
 
-    주의: ka10051/ka10086 둘 다 과거 날짜를 지정하면 그 날의 "장 마감(최종)" 수치만
-    돌려주고, 과거 특정 시각의 스냅샷은 제공하지 않습니다. 그래서 여기서 만드는
-    비교값은 "전일 같은 시각 대비"가 아니라 "전일 마감 대비" 입니다(증권사 HTS에서
-    흔히 쓰는 "전일대비"와 동일한 방식). 국내 수급(ka10051)은 시각별 이력을 제공하는
-    TR이 아예 없어 진짜 "같은 시각 대비"는 키움 REST API로는 만들 수 없습니다.
-
-    ka10051(업종별투자자순매수)은 하루치씩만 조회되므로 20영업일치를 얻으려면
-    반복 호출이 필요하고, ka10086(일별주가)은 종목 하나당 한 번의 호출로 여러
-    날짜를 돌려준다. 시장당 약 20~25회 API 호출이 필요해 다소 느릴 수 있어
-    (아래 get_domestic_history_cached에서) 자주 호출하지 않고 캐시해서 씁니다.
+    반환: (current dict, 수집 시각 ISO 문자열 또는 None(아직 한 번도 수집 안 됨))
     """
-    app_key = os.environ.get("KIWOOM_APP_KEY")
-    app_secret = os.environ.get("KIWOOM_APP_SECRET")
-    if is_placeholder(app_key) or is_placeholder(app_secret):
-        return {}
-    is_mock = os.environ.get("KIWOOM_IS_MOCK", "false").lower() == "true"
-    client = KiwoomClient(app_key, app_secret, is_mock)
-    client.login()
-    try:
-        data = {}
-        today_kst_str = datetime.now(KST).date().strftime("%Y%m%d")
-        yesterday_str = (datetime.now(KST).date() - timedelta(days=1)).strftime("%Y%m%d")
-        for market_name, code in KIWOOM_MARKET_CODES.items():
-            data[f"{market_name}_investor_netbuy_history"] = client.get_investor_net_buy_history(
-                code, days=20, end_date=today_kst_str
-            )
-
-            stock_hist = {}
-            for stock in (current.get(f"{market_name}_top_trading_value") or [])[:5]:
-                stk_cd = stock.get("code")
-                if not stk_cd:
-                    continue
-                stock_hist[stk_cd] = client.get_stock_trading_value_history(stk_cd, yesterday_str, days=20)
-            data[f"{market_name}_top_trading_value_history"] = stock_hist
-        return data
-    finally:
-        client.logout()
-
-
-_history_cache = {"data": None, "fetched_at": None}
-HISTORY_CACHE_TTL_SECONDS = 6 * 3600  # 20일치 이력은 자주 바뀌지 않으므로 6시간마다만 갱신
-
-
-def get_domestic_history_cached(current: dict) -> dict:
-    now = datetime.now(KST)
-    if _history_cache["data"] is not None and _history_cache["fetched_at"] is not None:
-        age = (now - _history_cache["fetched_at"]).total_seconds()
-        if age < HISTORY_CACHE_TTL_SECONDS:
-            return _history_cache["data"]
-    try:
-        data = collect_domestic_history(current)
-    except Exception:
-        logger.exception("국내 수급/거래대금 이력(전일·20일) 수집 중 오류")
-        data = _history_cache["data"] or {}
-    _history_cache["data"] = data
-    _history_cache["fetched_at"] = now
-    return data
+    snap = store.get(DOMESTIC_SNAPSHOT_KEY)
+    if not snap:
+        return {}, None
+    return snap.get("current") or {}, snap.get("fetched_at")
 
 
 def collect_overseas() -> dict:
@@ -245,17 +165,7 @@ def collect_ecos() -> dict:
     return {"kr_3y_bond_yield": value} if value is not None else {}
 
 
-def collect_night_futures() -> dict:
-    # 기본 비활성화: 무료로 쓸 수 있는 스크래핑 소스(sonmul.co.kr, esignal.co.kr,
-    # kred.dev 등)가 전부 자바스크립트/웹소켓으로만 값을 채워서, 서버(requests)로는
-    # 가져올 수 없는 상태입니다. 자세한 내용은 night_futures_client.py 상단 주석 참고.
-    if os.environ.get("NIGHT_FUTURES_ENABLED", "false").lower() != "true":
-        return {}
-    data = get_kospi200_night_futures()
-    return {"kospi200_night_futures": data} if data is not None else {}
-
-
-def collect_all() -> dict:
+def collect_all(store) -> dict:
     now = datetime.now(KST)
     if _cache["data"] is not None and _cache["fetched_at"] is not None:
         age = (now - _cache["fetched_at"]).total_seconds()
@@ -264,22 +174,15 @@ def collect_all() -> dict:
 
     current = {}
     try:
-        domestic = collect_domestic()
+        domestic, domestic_fetched_at = get_domestic_snapshot(store)
         current.update(domestic)
     except Exception:
-        logger.exception("국내 지표 수집 중 오류")
-        domestic = {}
-
-    if domestic:
-        try:
-            current.update(get_domestic_history_cached(current))
-        except Exception:
-            logger.exception("국내 수급/거래대금 이력 수집 중 오류")
+        logger.exception("국내 지표(Redis) 조회 중 오류")
+        domestic_fetched_at = None
 
     for collector, label in (
         (collect_overseas, "해외"),
         (collect_ecos, "ECOS"),
-        (collect_night_futures, "야간선물"),
     ):
         try:
             current.update(collector())
@@ -288,6 +191,7 @@ def collect_all() -> dict:
 
     _cache["data"] = current
     _cache["fetched_at"] = now
+    _cache["domestic_fetched_at"] = domestic_fetched_at
     return current
 
 
@@ -334,23 +238,17 @@ def get_or_create_anchor(store, key: str, current: dict) -> dict:
 
 
 # ----------------------------------------------------------------------
-# 자체 시계열 로그 - "전일 현시각 대비" / "최근 20일 평균 현시각 대비"를 만들려면
-# 키움 API의 일별(마감) 데이터만으로는 부족합니다 (과거 특정 시각의 스냅샷을
-# 제공하지 않음). 그래서 이 앱이 직접, 접속이 있을 때마다 현재값을 시각과 함께
-# 저장해두고, 나중에 "어제 같은 시각"/"최근 20일 같은 시각"에 가장 가까운 값을
-# 찾아 비교합니다. 서버가 오래 잠들어 있었거나(무료 호스팅 슬립) 아무도 접속하지
-# 않은 시간대는 로그에 구멍이 생길 수 있어, 가장 가까운 기록이 너무 멀면(기본
-# 90분 초과) 비교값을 만들지 않습니다.
+# 자체 시계열 로그(읽기 전용) - "전일 현시각 대비" / "최근 20일 평균 현시각 대비"를
+# 만들려면 키움 API의 일별(마감) 데이터만으로는 부족합니다. 그래서 집 PC의
+# local_collector.py가 국내 데이터를 수집할 때마다 시각과 함께 로그를 남겨두고
+# (domestic_collector.py의 log_intraday_snapshot - 반드시 아래 상수와 동일한
+# INTRADAY_LOG_INTERVAL_MINUTES를 씀), 이 서버는 그 로그를 읽어서 "어제 같은
+# 시각"/"최근 20일 같은 시각"에 가장 가까운 값을 찾아 비교하기만 합니다.
+# 집 PC가 꺼져 있던 시간대는 로그에 구멍이 생길 수 있어, 가장 가까운 기록이
+# 너무 멀면(기본 90분 초과) 비교값을 만들지 않습니다.
 # ----------------------------------------------------------------------
 INTRADAY_LOG_INTERVAL_MINUTES = 15
-INTRADAY_LOG_RETENTION_DAYS = 25  # 20일 평균 + 여유분
 INTRADAY_LOG_MAX_GAP_MINUTES = 90
-
-_INTRADAY_FIELDS = (
-    "kospi_index", "kosdaq_index",
-    "kospi_investor_netbuy", "kosdaq_investor_netbuy",
-    "kospi_top_trading_value", "kosdaq_top_trading_value",
-)
 
 
 def _round_to_interval(now: datetime, minutes: int = INTRADAY_LOG_INTERVAL_MINUTES) -> str:
@@ -362,33 +260,6 @@ def _round_to_interval(now: datetime, minutes: int = INTRADAY_LOG_INTERVAL_MINUT
 def _time_key_to_minutes(t: str) -> int:
     h, m = t.split(":")
     return int(h) * 60 + int(m)
-
-
-def log_intraday_snapshot(store, current: dict, now: datetime) -> None:
-    """국내 지수/수급/거래대금 상위를 시각과 함께 오늘자 로그에 추가 (이미 같은
-    15분 구간에 기록했으면 건너뜀)."""
-    if not any(current.get(f) for f in _INTRADAY_FIELDS):
-        return  # 국내 데이터가 아예 없으면(키 미설정 등) 로그도 의미 없음
-
-    date_key = now.date().isoformat()
-    time_key = _round_to_interval(now)
-    log_store_key = f"tslog__{date_key}"
-    day_log = store.get(log_store_key) or []
-    if day_log and day_log[-1].get("time") == time_key:
-        return
-
-    snapshot = {"time": time_key}
-    for f in _INTRADAY_FIELDS:
-        snapshot[f] = current.get(f)
-    day_log.append(snapshot)
-    store.put(log_store_key, day_log)
-
-    idx = store.get("tslog_dates") or []
-    if date_key not in idx:
-        idx.append(date_key)
-        cutoff = (now.date() - timedelta(days=INTRADAY_LOG_RETENTION_DAYS)).isoformat()
-        idx = sorted(d for d in idx if d >= cutoff)
-        store.put("tslog_dates", idx)
 
 
 def _find_closest_snapshot(day_log: list, target_time_key: str, max_gap_minutes: int = INTRADAY_LOG_MAX_GAP_MINUTES):
@@ -609,20 +480,6 @@ def build_items(
         b = baseline.get("kr_3y_bond_yield")
         items.append(_with_change("금리", "한국 국채 3년물", kr_bond, "%", b))
 
-    night_fut = current.get("kospi200_night_futures")
-    if night_fut:
-        b = (baseline.get("kospi200_night_futures") or {}).get("price")
-        items.append(
-            _with_change(
-                "선물 (비공식)",
-                "코스피200 야간선물",
-                night_fut["price"],
-                "",
-                b,
-                extra=f"전일종가대비 {night_fut['change_pct_vs_prev_close']:+.2f}%",
-            )
-        )
-
     overseas_current = current.get("overseas_prices", {})
     overseas_labels = current.get("overseas_labels", {})
     overseas_baseline = baseline.get("overseas_prices", {})
@@ -641,17 +498,12 @@ def build_items(
 def build_report_payload() -> dict:
     now = datetime.now(KST)
     slot = resolve_slot(now)
-    current = collect_all()
-
     store = get_store()
+    current = collect_all(store)
+
     anchor_key = anchor_key_for_slot(now, slot)
     is_fresh = store.get(anchor_key) is None
     baseline = get_or_create_anchor(store, anchor_key, current)
-
-    try:
-        log_intraday_snapshot(store, current, now)
-    except Exception:
-        logger.exception("자체 시계열 로그 기록 중 오류")
 
     try:
         same_time_yesterday = get_same_time_yesterday(store, now)
@@ -670,6 +522,7 @@ def build_report_payload() -> dict:
         "slot": slot,
         "baseline_label": baseline_label_for(now, slot),
         "baseline_is_fresh": is_fresh,
+        "domestic_fetched_at": _cache.get("domestic_fetched_at"),
         "items": build_items(current, baseline, now, same_time_yesterday, same_time_avg, same_time_avg_days),
     }
 

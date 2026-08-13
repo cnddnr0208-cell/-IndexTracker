@@ -93,13 +93,6 @@ ecos:
   enabled: false
   api_key: "YOUR_ECOS_API_KEY"
 
-# 코스피200 야간선물 - 키움 REST API에는 선물/옵션 카테고리가 없어
-# 비공식 사이트(sonmul.co.kr) 스크래핑으로 대체합니다. (참고용, README 참고)
-# 무료로 쓸 수 있는 스크래핑 소스를 찾지 못해(전부 자바스크립트/웹소켓 렌더링)
-# 기본 비활성화. night_futures_client.py 상단 주석 참고.
-night_futures:
-  enabled: false
-
 # 리포트 스케줄 (Asia/Seoul 기준, main.py --slot 인자로 지정)
 schedule:
   timezone: "Asia/Seoul"

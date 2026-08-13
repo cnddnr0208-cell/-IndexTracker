@@ -20,7 +20,6 @@ import yaml
 from ecos_client import get_kr_3y_bond_yield
 from kakao_notifier import KakaoNotifier
 from kiwoom_client import KiwoomClient
-from night_futures_client import get_kospi200_night_futures
 from overseas_client import OverseasClient
 from snapshot_store import SnapshotStore
 
@@ -86,14 +85,6 @@ def collect_ecos(config: dict) -> dict:
     return {"kr_3y_bond_yield": value} if value is not None else {}
 
 
-def collect_night_futures(config: dict) -> dict:
-    nf_cfg = config.get("night_futures", {})
-    if not nf_cfg.get("enabled"):
-        return {}
-    data = get_kospi200_night_futures()
-    return {"kospi200_night_futures": data} if data is not None else {}
-
-
 def pct_change(current, baseline) -> str:
     if current is None or baseline is None or baseline == 0:
         return "기준값 없음"
@@ -143,16 +134,6 @@ def build_message(now: datetime, slot_name: str, current: dict, baseline: dict, 
     if kr_bond is not None:
         base_bond = (baseline or {}).get("kr_3y_bond_yield")
         lines.append(f"- 한국 국채 3년물: {fmt_num(kr_bond)}% (기준대비 {pct_change(kr_bond, base_bond)})")
-
-    # 코스피200 야간선물 (비공식 소스, 참고용)
-    night_fut = current.get("kospi200_night_futures")
-    if night_fut:
-        base_night_fut = ((baseline or {}).get("kospi200_night_futures") or {}).get("price")
-        lines.append(
-            f"- 코스피200 야간선물(비공식,sonmul.co.kr): {fmt_num(night_fut['price'])} "
-            f"(기준대비 {pct_change(night_fut['price'], base_night_fut)}, "
-            f"전일종가대비 {night_fut['change_pct_vs_prev_close']:+.2f}%)"
-        )
 
     # 해외 자산
     overseas_current = current.get("overseas_prices", {})
@@ -208,11 +189,6 @@ def main():
         current.update(collect_ecos(config))
     except Exception:
         logger.exception("ECOS 지표 수집 중 오류 발생")
-
-    try:
-        current.update(collect_night_futures(config))
-    except Exception:
-        logger.exception("코스피200 야간선물 수집 중 오류 발생")
 
     store = SnapshotStore(config.get("snapshot_file", "snapshots.json"))
     baseline_key = resolve_baseline_key(today, args.slot, config["schedule"]["slots"])

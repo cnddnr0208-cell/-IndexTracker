@@ -1,10 +1,13 @@
 # 지수 알리미 (웹 대시보드)
 
-키움증권 REST API로 국내 지수/수급/거래대금을, Yahoo Finance(yfinance)로 해외 지수·원자재·환율·코인·금리를,
-보여주는 **웹 대시보드**입니다(코스피200 야간선물은 무료로 쓸 수 있는 소스가 없어 현재 비활성화 -
-아래 "코스피200 야간선물" 항목 참고).
+키움증권 REST API로 국내 지수/수급/거래대금을, Yahoo Finance(yfinance)로 해외 지수·원자재·환율·코인·금리를
+보여주는 **웹 대시보드**입니다.
 브라우저로 접속하면 현재값과 "기준점 대비 변동률"을 확인할 수 있고, 인터넷에 배포하면 PC·모바일 어디서나
 접속할 수 있습니다.
+
+**구조 참고:** 국내 데이터(키움 API)는 웹 서버(Render)가 아니라 집 PC가 수집합니다. 키움 계좌의
+"지정단말기(IP)" 보안 설정 때문에 등록된 기기에서만 로그인이 되기 때문입니다. 자세한 내용과 설정
+방법은 아래 "국내 데이터 수집 - 집 PC 병행 실행" 섹션을 참고하세요.
 
 ## 화면 갱신 방식 (한국시간 기준 08:00 / 20:00 두 기준점)
 
@@ -24,18 +27,19 @@
 ## 국내 수급/거래대금/지수의 "전일 동시각" · "최근 20일 동시각 평균" 비교
 
 키움 REST API는 과거 특정 "시각"의 스냅샷을 제공하지 않고 하루 단위(장 마감) 데이터만
-제공하기 때문에, 진짜 "어제 지금 이 시각 대비"를 만들려면 이 앱이 직접 값을 시각과 함께
-기록해둬야 합니다. 그래서 대시보드에 접속(또는 자동 갱신)될 때마다 국내 지수/수급/거래대금
-상위 값을 15분 단위로 저장해두고(`app.py`의 `log_intraday_snapshot`), 이후
+제공하기 때문에, 진짜 "어제 지금 이 시각 대비"를 만들려면 값을 시각과 함께 기록해둬야
+합니다. 그래서 집 PC의 `local_collector.py`가 국내 데이터를 수집할 때마다(장중 기본
+1~2분 간격 권장) 시각과 함께 저장해두고(`domestic_collector.py`의 `log_intraday_snapshot`),
+`app.py`(Render)는 이 로그를 읽어서
 
 - **전일동시각比**: 어제 같은 시각(±90분 이내에서 가장 가까운 기록)과 비교
 - **최근N일동시각평균比**: 저장된 과거 날짜들 중 최대 20일치의 같은 시각 기록을 평균내어 비교
   (라벨의 "N일"은 실제로 몇 일치가 쌓였는지를 보여줌 - 막 시작했다면 1~2일부터 시작해서
   운영 기간이 늘어날수록 20일까지 채워짐)
 
-으로 표시합니다. 이 로그는 접속(또는 자동 갱신)이 있을 때만 쌓이므로, 무료 호스팅이 슬립되어
-있거나 아무도 안 본 시간대는 기록에 빈 구간이 생길 수 있습니다. 그 경우 해당 항목은
-비교값 없이("-") 표시됩니다.
+으로 표시합니다. 이 로그는 집 PC가 수집을 실행했을 때만 쌓이므로, 집 PC가 꺼져 있거나
+장 시간 외인 동안은 기록에 빈 구간이 생길 수 있습니다. 그 경우 해당 항목은 비교값
+없이("-") 표시됩니다.
 
 이와 별개로 국내 수급/거래대금 상위에는 **종가** / **20일평균** 비교도 함께 표시되는데,
 이건 키움 공식 API(ka10051/ka10086)의 과거 날짜 데이터를 그대로 가져온 값이라 "같은
@@ -60,10 +64,11 @@
 수도 있습니다.
 
 갱신 주기는 `app.py`의 `CACHE_TTL_SECONDS`, `WS_PUSH_INTERVAL_SECONDS` 값을 바꿔 조절할 수
-있습니다. 다만 키움 REST API는 TR별로 초당 호출 제한이 있으니 너무 짧게(수 초 단위) 잡지 않는
-것을 권장합니다. 참고로 여러 항목(야간선물, ECOS 국채금리 등)은 원본 소스 자체가 초단위
-실시간이 아니라서(스크래핑/일별 통계), 20초 주기로 갱신해도 값 자체가 그보다 드물게 바뀔 수
-있습니다.
+있습니다. 이 주기는 해외 자산/ECOS/Redis 조회에만 영향을 주고, 키움 API 호출 빈도와는
+무관합니다(국내 데이터는 `local_collector.py`가 별도 스케줄로 수집 - 위 "국내 데이터 수집"
+섹션 참고, 거기서 TR 호출 제한을 고려해 간격을 정하면 됩니다). 참고로 ECOS 국채금리 같은
+일부 항목은 원본 소스 자체가 초단위 실시간이 아니라서(일별 통계), 20초 주기로 갱신해도
+값 자체가 그보다 드물게 바뀔 수 있습니다.
 
 ## 빠른 시작 (로컬에서 먼저 테스트)
 
@@ -73,7 +78,8 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-`.env` 파일을 열어 키움 앱키 등 값을 채운 뒤:
+`.env` 파일을 열어 키움 앱키 등 값을 채운 뒤, 국내 데이터를 한 번 수집해두고
+(`py local_collector.py` - 장중에만 실제로 수집됩니다):
 
 ```bash
 uvicorn app:app --host 0.0.0.0 --port 8000
@@ -109,15 +115,70 @@ Render는 GitHub 저장소를 연결해서 배포합니다. 이 `지수알리미
    - Start Command: `uvicorn app:app --host 0.0.0.0 --port $PORT`
    - Instance Type: Free
 4. **Environment** 탭에서 아래 환경변수 추가 (`.env.example` 참고):
-   - `KIWOOM_APP_KEY`, `KIWOOM_APP_SECRET`, `KIWOOM_IS_MOCK`
    - `ECOS_ENABLED`, `ECOS_API_KEY` (선택)
-   - `NIGHT_FUTURES_ENABLED`
    - `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD` — **반드시 설정하세요.** 인터넷에 공개되는
      주소이므로, 이 값이 없으면 URL을 아는 누구나 내 시세/수급 데이터를 볼 수 있습니다.
-   - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+   - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — 아래 "국내 데이터 수집 - 집 PC
+     병행 실행"에서 집 PC와 **반드시 같은 값**을 써야 합니다.
+   - `KIWOOM_APP_KEY`/`KIWOOM_APP_SECRET`/`KIWOOM_IS_MOCK`는 Render에는 필요 없습니다
+     (국내 데이터는 집 PC가 대신 수집합니다 - 아래 섹션 참고).
 5. **Create Web Service** 클릭 → 몇 분 후 `https://내앱이름.onrender.com` 형태의 주소가 생깁니다.
 
 이제 이 주소로 PC·모바일 어디서나 (아이디/비밀번호 입력 후) 접속할 수 있습니다.
+
+## 국내 데이터 수집 - 집 PC 병행 실행 (필수)
+
+키움증권 계좌에 "지정단말기(IP)" 보안 설정이 걸려 있으면, 등록된 기기의 IP에서만 로그인이
+허용됩니다(계좌 APP KEY 관리 페이지의 "IP 등록"). Render 서버는 매번 다른 공유 IP를 쓰기
+때문에 이 조건을 만족할 수 없어, 국내 지수/수급/거래대금은 Render가 아니라 **이미 등록된
+집 PC**가 대신 수집해서 Upstash Redis에 저장하고, Render는 그 값을 읽기만 하도록
+구성했습니다.
+
+```
+집 PC (local_collector.py) --키움 로그인/조회--> 저장 --> Upstash Redis <--읽기-- Render (app.py)
+```
+
+### 1) 집 PC에 환경변수 설정
+
+로컬 `.env` 파일에 아래 값이 모두 채워져 있어야 합니다 (`.env.example` 참고):
+
+- `KIWOOM_APP_KEY`, `KIWOOM_APP_SECRET`, `KIWOOM_IS_MOCK`
+- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — **Render에 입력한 것과 완전히 같은 값**
+  이어야 합니다. 다르면 두 쪽이 서로 다른 저장소를 보게 되어 Render 화면에 국내 데이터가
+  계속 비어 있습니다.
+
+### 2) 수동으로 한 번 테스트
+
+```bash
+cd 지수알리미
+py local_collector.py
+```
+
+로그에 `국내 데이터 수집/저장 완료`가 뜨면 성공입니다. 이후 Render 대시보드를 새로고침하면
+국내 지수/수급/거래대금이 보여야 합니다. (`지정단말기 인증에 실패했습니다` 오류가 나면 이
+PC의 IP가 키움 계좌의 IP 등록 목록에 없는 것이니, 키움 홈페이지 "계좌 APP KEY 관리"에서
+현재 IP를 등록하세요.)
+
+### 3) Windows 작업 스케줄러에 등록 (자동 반복 실행)
+
+1. 시작 메뉴에서 "작업 스케줄러" 실행 → **기본 작업 만들기**
+2. 이름: `지수알리미 국내데이터 수집`
+3. 트리거: **매일**, 이후 "반복 간격" 옵션에서 **1~2분마다** 하루 종일 반복되도록 설정
+   (작업 속성의 트리거 편집 화면 → "반복 간격" 체크 후 시간 지정)
+4. 동작: **프로그램 시작**
+   - 프로그램/스크립트: `py` (또는 `python`의 전체 경로, `where py`로 확인 가능)
+   - 인수 추가: `local_collector.py`
+   - 시작 위치: `지수알리미` 폴더의 전체 경로 (예: `C:\Users\지웅\Desktop\키움지웅\지수알리미`)
+5. 완료 후 저장 - 실제로는 스크립트 안의 `is_market_hours()`가 국내 정규장(평일
+   08:50~15:35)이 아니면 즉시 종료하므로, 스케줄러에는 짧은 간격으로만 등록해두면
+   되고 나머지는 스크립트가 알아서 걸러냅니다.
+
+### 4) 데이터가 오래됐을 때
+
+대시보드 상단에 "국내 데이터 기준시각: HH:MM (n분 전)"이 표시됩니다. 20분 넘게 갱신되지
+않으면 경고 문구가 뜨는데, 대부분 집 PC가 꺼져 있거나 절전 모드에 들어간 경우입니다.
+집 PC가 꺼져 있는 동안에도 해외 자산/금리/대시보드 자체는 Render에서 정상적으로
+계속 동작하고, 국내 데이터만 마지막으로 수집된 값에 멈춰 있습니다.
 
 ## 로컬 스케줄 실행이 필요하다면 (선택)
 
@@ -125,23 +186,6 @@ Render는 GitHub 저장소를 연결해서 배포합니다. 이 `지수알리미
 `config.yaml`을 대신 사용할 수 있습니다. `python main.py --slot morning` 형태로 실행하며,
 자세한 내용은 `config.example.yaml`과 코드 상단 docstring을 참고하세요. 웹 대시보드(`app.py`)와는
 독립적으로 동작합니다.
-
-## 코스피200 야간선물 (현재 비활성화)
-
-키움 REST API 공식 TR 목록(OAuth인증/국내주식/미국주식)을 전부 확인했지만 국내 선물·옵션
-카테고리 자체가 없어, 코스피200 야간선물은 REST API로 조회할 수 없습니다.
-
-무료 실시간 시세 사이트를 여러 곳(sonmul.co.kr, esignal.co.kr, kred.dev, nightkospi.com,
-moneyrecipe.blog, futurespotal.com) 확인해봤지만 전부 서버는 빈 HTML 껍데기만 내려주고
-실제 가격은 브라우저의 자바스크립트가 웹소켓/API로 채워 넣는 구조였습니다. 이 앱의
-스크래핑 방식(Python `requests`로 HTML만 가져옴)으로는 이런 사이트에서 값을 가져올 수
-없어 - 원리상 해결이 안 되는 문제라 - `NIGHT_FUTURES_ENABLED` 기본값을 `false`로 바꿨습니다.
-(`night_futures_client.py` 상단에 더 자세한 설명과, 나중에 되살리고 싶을 때의 선택지를
-남겨뒀습니다.)
-
-대신 이미 대시보드의 "해외 자산" 섹션에 있는 미국 지수 선물(나스닥100/S&P500)과 달러/원
-환율이 야간선물의 방향성을 가늠하는 참고 지표로 쓸 수 있습니다(다음 날 코스피 시가에
-영향을 주는 요인들이라 실제로도 상관관계가 있습니다).
 
 ## 국내 지수/수급 데이터가 안 나올 때 (kiwoom-rest-api 패키지 관련)
 
@@ -164,8 +208,9 @@ py -m pip install -r requirements.txt
 - `kiwoom_client.py`의 각 함수는 공식 가이드(https://openapi.kiwoom.com/guide/apiguide,
   로그인 필요) 기준 TR ID(ka20003, ka10051, ka10032)를 사용합니다. 응답 필드명이 다르면
   `_first_present()`의 candidates 리스트에 실제 필드명을 추가하세요.
-- `app.py`의 `KIWOOM_MARKET_CODES`(코스피=001, 코스닥=101)는 레거시 Open API+ 관례를 따른
-  값입니다. ka10101(업종코드 리스트)로 본인 계정 기준 정확한 코드를 한 번 확인하세요.
+- `domestic_collector.py`의 `KIWOOM_MARKET_CODES`(코스피=001, 코스닥=101)는 레거시 Open API+
+  관례를 따른 값입니다. ka10101(업종코드 리스트)로 본인 계정 기준 정확한 코드를 한 번
+  확인하세요.
 - 해외 자산 티커(yfinance)는 대부분 검증된 값이지만, 선물 종목(NQ=F, ES=F 등)은 롤오버 시점에
   따라 심볼이 자동 전환되는지 야후 쪽 정책에 따라 달라질 수 있습니다.
 - 미국 2년물 국채금리는 안정적인 무료 실시간 소스를 찾지 못해 대상에서 제외했습니다.
@@ -183,17 +228,18 @@ py -m pip install -r requirements.txt
 
 ```
 지수알리미/
-├── app.py                   # 웹 대시보드 서버 (FastAPI)
+├── app.py                   # 웹 대시보드 서버 (FastAPI, Render에서 실행) - 국내 데이터는 Redis에서 읽기만 함
+├── local_collector.py        # 집 PC에서 주기 실행 - 키움 API로 국내 데이터 수집 후 Redis에 저장
+├── domestic_collector.py      # local_collector.py가 쓰는 국내 데이터 수집/시계열 로그 로직
 ├── static/index.html        # 대시보드 화면 (모바일 반응형, 자동 새로고침)
 ├── main.py                  # (선택) CLI/로컬 스케줄 실행 버전
-├── kiwoom_client.py          # 키움 REST API (국내 지수/수급/거래대금)
+├── kiwoom_client.py          # 키움 REST API 클라이언트 (domestic_collector.py가 사용)
 ├── overseas_client.py        # yfinance (해외 지수/원자재/환율/코인/금리)
 ├── ecos_client.py             # 한국은행 ECOS (국채 3년물, 선택)
-├── night_futures_client.py    # 코스피200 야간선물 (sonmul.co.kr 비공식 스크래핑)
-├── snapshot_store.py           # 로컬 파일 기반 스냅샷 저장소 (main.py / 로컬 폴백용)
+├── snapshot_store.py           # 로컬 파일 기반 스냅샷 저장소 + get_store() (Redis/로컬 선택)
 ├── snapshot_store_redis.py     # Upstash Redis 기반 스냅샷 저장소 (클라우드 배포용)
 ├── config.example.yaml         # main.py(CLI 버전)용 설정 예시
-├── .env.example                # app.py(웹 버전)용 환경변수 예시
+├── .env.example                # app.py/local_collector.py 공용 환경변수 예시
 ├── Procfile                    # 클라우드 배포 시작 명령
 ├── requirements.txt
 └── README.md

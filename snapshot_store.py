@@ -8,9 +8,35 @@
 """
 
 import json
+import logging
 import os
 from datetime import date
 from typing import Dict, Optional
+
+from snapshot_store_redis import RedisSnapshotStore
+
+logger = logging.getLogger(__name__)
+
+
+def get_store():
+    """
+    저장소 인스턴스를 만든다 (Redis 우선, 없으면 로컬 파일로 폴백).
+
+    app.py(Render)와 local_collector.py(집 PC)가 "같은" Upstash Redis를
+    바라봐야 서로 데이터를 주고받을 수 있으므로, 이 함수 하나로 통일해서
+    둘 다 사용합니다. UPSTASH_REDIS_REST_TOKEN이 .env.example의 예시값
+    그대로 남아있으면(설정을 안 한 것으로 보고) 로컬 파일로 폴백합니다.
+    """
+    url = os.environ.get("UPSTASH_REDIS_REST_URL")
+    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+    if url and token and token != "YOUR_UPSTASH_TOKEN" and "xxxx" not in url:
+        return RedisSnapshotStore(url, token)
+    logger.warning(
+        "UPSTASH_REDIS_REST_URL/TOKEN이 설정되지 않았습니다 - 로컬 파일(snapshots.json)로 폴백합니다. "
+        "Render 등 클라우드 호스팅에서는 재시작 시 값이 초기화될 수 있고, local_collector.py와도 "
+        "데이터를 공유할 수 없습니다."
+    )
+    return SnapshotStore("snapshots.json")
 
 
 class SnapshotStore:

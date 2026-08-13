@@ -218,7 +218,9 @@
     </div>
   </header>
   <div class="meta" id="meta">불러오는 중...</div>
+  <div class="meta" id="domestic-meta"></div>
   <div id="warning"></div>
+  <div id="domestic-warning"></div>
   <div id="edit-hint"></div>
   <div id="content"></div>
   <div class="status" id="status"></div>
@@ -377,6 +379,31 @@ function scheduleReconnectOrFallback() {
 }
 
 const WS_INTERVAL_HINT = 20;
+const DOMESTIC_STALE_MINUTES = 20; // 이보다 오래되면 "집 PC가 꺼져있을 수 있음" 경고 표시
+
+// 국내 데이터(집 PC가 Redis에 넣어둔 값)의 수집 시각을 화면에 표시.
+// domestic_fetched_at이 없으면(한 번도 수집 안 됨) 항상 경고를 띄운다.
+function renderDomesticStatus(data) {
+  const metaEl = document.getElementById("domestic-meta");
+  const warnEl = document.getElementById("domestic-warning");
+  const fetchedAt = data.domestic_fetched_at;
+
+  if (!fetchedAt) {
+    metaEl.textContent = "";
+    warnEl.innerHTML = `<div class="baseline-warning">국내 지수/수급/거래대금이 아직 한 번도 수집되지 않았습니다. 집 PC의 local_collector.py가 실행 중인지 확인하세요.</div>`;
+    return;
+  }
+
+  const fetchedDate = new Date(fetchedAt);
+  const ageMin = (Date.now() - fetchedDate.getTime()) / 60000;
+  metaEl.textContent = `국내 데이터 기준시각: ${fetchedDate.toLocaleTimeString("ko-KR")} (${ageMin < 1 ? "방금" : Math.round(ageMin) + "분 전"})`;
+
+  if (ageMin > DOMESTIC_STALE_MINUTES) {
+    warnEl.innerHTML = `<div class="baseline-warning">국내 데이터가 ${Math.round(ageMin)}분 전 값으로 오래됐습니다. 집 PC가 꺼져 있거나 장 시간 외일 수 있습니다.</div>`;
+  } else {
+    warnEl.innerHTML = "";
+  }
+}
 
 // ------------------------------------------------------------------
 // 순서 편집 (드래그 앤 드롭 + localStorage 저장)
@@ -512,6 +539,8 @@ function render(data) {
   warningEl.innerHTML = data.baseline_is_fresh
     ? `<div class="baseline-warning">지금 값이 이번 구간의 기준점(${escapeHtml(data.baseline_label || "")})으로 막 저장됐습니다. 그래서 변동폭/변동률이 0으로 보입니다 - 이후 값부터 이 기준과 비교됩니다.</div>`
     : "";
+
+  renderDomesticStatus(data);
 
   const items = data.items || [];
   const bySection = {};
